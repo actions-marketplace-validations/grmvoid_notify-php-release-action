@@ -1,18 +1,31 @@
-on: [push]
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
 
 permissions:
-  issues: write
+  contents: read
 
 jobs:
-  notify_new_releases:
+  verify:
     runs-on: ubuntu-latest
     steps:
-      - name: checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Check new php releases.
-        uses: ./
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          repo-token: ${{ github.token }}
-          repo: notify-php-release-action
-          owner: sxbrsky
-          localfile: .releases
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run quality checks
+        run: npm run lint && npm run typecheck && npm test && npm run format:check
+
+      - name: Verify bundled action
+        run: npm run build && git diff --exit-code -- dist
