@@ -1,5 +1,5 @@
 name: Notify PHP Releases
-description: A GitHub Action to automatically creates an issue when a new version of PHP is released.
+description: A GitHub Action that creates an issue when a new PHP version is released.
 author: Dominik Szamburski
 
 branding:
@@ -10,10 +10,10 @@ inputs:
   localfile:
     required: false
     default: .releases
-    description: The local file containing current php release.
+    description: The local file containing the currently used PHP releases.
   repo-token:
     required: true
-    description: Token for interacting with the Github API. Default to using the special GITHUB_TOKEN. Because of limitations imposed by GitHub, this must be set if you want the setting of the PR label to trigger an event.
+    description: Token used to create and search GitHub issues.
     default: ${{ github.token }}
   owner:
     required: true

@@ -1,75 +1,61 @@
 import * as process from 'node:process'
-import { resolve } from 'node:path'
-import { readFileSync } from 'node:fs'
-import { error, info } from '@actions/core'
+import { info, setFailed } from '@actions/core'
 import { getOctokit } from '@actions/github'
+import { parseReleases, readCurrentReleases } from './releases.js'
 
-const getReleasesFromEnv = (): object[] => {
-  if (!process.env.RELEASES) {
-    throw new Error('Enviroment variable "RELEASES" was not set.')
+const requireEnvironmentVariable = (name: string): string => {
+  const value = process.env[name]?.trim()
+
+  if (!value) {
+    throw new Error(`Environment variable "${name}" was not set.`)
   }
 
-  return JSON.parse(process.env.RELEASES)
+  return value
 }
 
-const getCurrentReleases = (localfile: string | null): string[] => {
-  if (localfile) {
-    return readFileSync(resolve(localfile)).toString().split(/\r?\n/)
-  }
+export const run = async (): Promise<void> => {
+  const token = requireEnvironmentVariable('REPO_TOKEN')
+  const owner = requireEnvironmentVariable('OWNER')
+  const repo = requireEnvironmentVariable('REPO')
+  const localFile = requireEnvironmentVariable('LOCALFILE')
+  const releases = parseReleases(requireEnvironmentVariable('RELEASES'))
+  const currentReleases = readCurrentReleases(localFile)
+  const octokit = getOctokit(token)
 
-  return []
-}
-
-const main = async () => {
-  const localfile = process.env.LOCALFILE || null
-  const owner = process.env.OWNER || ''
-  const repo = process.env.REPO || ''
-  const repo_token = process.env.REPO_TOKEN || ''
-
-  if (!repo_token || !repo || !owner) {
-    error('Missing REPO_TOKEN')
-    return
-  }
-
-  const octokit = getOctokit(repo_token)
-  const current = getCurrentReleases(localfile)
-
-  for (const value of getReleasesFromEnv()) {
-    const release = value as { version: string; sources: object[] }
-
-    if (!current.includes(release.version)) {
-      const title = `build: bump PHP release to ${release.version}`
-
-      const response = await octokit.request(
-        'GET /search/issues?q=' +
-          encodeURIComponent(`${title} in:title repo:${owner}/${repo}`),
-      )
-
-      if (response.data.total_count == 0) {
-        octokit
-          .request('POST /repos/{owner}/{repo}/issues', {
-            owner,
-            repo,
-            title,
-            body: 'bump PHP version to latest one.',
-            headers: {
-              'X-GitHub-Api-Version': '2022-11-28',
-            },
-          })
-          .catch((err) => {
-            if (err.response) {
-              error(err)
-            }
-          })
-      } else {
-        /* eslint-disable */
-        info(
-          `Found similar issues: ${response.data.items.map((item: any) => item.html_url, '\n')}`,
-        )
-        /* eslint-enable */
-      }
+  for (const version of new Set(releases.map((release) => release.version))) {
+    if (currentReleases.has(version)) {
+      continue
     }
+
+    const title = `build: bump PHP release to ${version}`
+    const response = await octokit.rest.search.issuesAndPullRequests({
+      q: `repo:${owner}/${repo} is:issue in:title ${JSON.stringify(title)}`,
+      per_page: 100,
+    })
+    const matchingIssues = response.data.items.filter(
+      (issue) => issue.title === title,
+    )
+
+    if (matchingIssues.length > 0) {
+      info(
+        `Found matching issue(s) for PHP ${version}:\n${matchingIssues
+          .map((issue) => issue.html_url)
+          .join('\n')}`,
+      )
+      continue
+    }
+
+    const issue = await octokit.rest.issues.create({
+      owner,
+      repo,
+      title,
+      body: `Bump PHP version to ${version}.`,
+    })
+
+    info(`Created issue for PHP ${version}: ${issue.data.html_url}`)
   }
 }
 
-main()
+run().catch((error: unknown) => {
+  setFailed(error instanceof Error ? error.message : String(error))
+})
